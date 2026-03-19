@@ -628,8 +628,8 @@ function App() {
             </span>
           </div>
         </div>
-        <div className="flex gap-4">
-          <div ref={historyDropdownRef} className="relative">
+        <div className="flex items-center gap-4">
+          <div ref={historyDropdownRef} className="relative flex items-center">
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
