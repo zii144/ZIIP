@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Send,
@@ -460,6 +460,33 @@ function App() {
   useEffect(() => {
     saveCollections(collections);
   }, [collections]);
+
+  const unresolvedVars = useMemo(() => {
+    const vars = getActiveEnvVariables(environments, activeEnvironmentId);
+    const { unresolved } = resolveRequestData(
+      vars,
+      url,
+      params,
+      headers,
+      bodyContent,
+      authType,
+      bearerToken,
+      basicUsername,
+      basicPassword,
+    );
+    return unresolved;
+  }, [
+    environments,
+    activeEnvironmentId,
+    url,
+    params,
+    headers,
+    bodyContent,
+    authType,
+    bearerToken,
+    basicUsername,
+    basicPassword,
+  ]);
 
   const openCreateCollectionModal = () => {
     setNewCollectionName("");
@@ -1857,6 +1884,28 @@ function App() {
             <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
               Target Endpoint
             </h2>
+            {unresolvedVars.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm"
+              >
+                <span className="font-medium shrink-0">
+                  Unresolved: {unresolvedVars.join(", ")}
+                </span>
+                <span className="text-amber-600">—</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsOpen(true);
+                    setSettingsTab("Environments");
+                  }}
+                  className="font-medium text-amber-700 hover:text-amber-900 underline underline-offset-1 cursor-pointer"
+                >
+                  Add them in Settings → Environments
+                </button>
+              </motion.div>
+            )}
             <div className="flex gap-2 p-1 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-slate-400 focus-within:ring-1 focus-within:ring-slate-400 transition-all shadow-sm">
               <select
                 className="bg-transparent text-slate-700 border-none px-4 py-2 text-sm font-bold focus:outline-none cursor-pointer hover:bg-slate-200/50 rounded-lg transition-colors appearance-none"
