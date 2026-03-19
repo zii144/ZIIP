@@ -24,6 +24,47 @@ type KeyValuePair = {
 
 type ChatMessage = { id: string; role: "user" | "assistant"; text: string };
 
+type RequestHistoryEntry = {
+  id: string;
+  method: string;
+  url: string;
+  timestamp: number;
+  status?: number;
+  time_ms?: number;
+};
+
+const HISTORY_STORAGE_KEY = "ziip-request-history";
+const HISTORY_MAX_ITEMS = 50;
+
+function formatRelativeTime(ts: number): string {
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 10) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
+function loadHistory(): RequestHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(entries: RequestHistoryEntry[]) {
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
+  } catch {}
+}
+
 const HEADER_PRESETS: { label: string; key: string; value: string }[] = [
   {
     label: "Content-Type JSON",
@@ -83,11 +124,65 @@ function App() {
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [requestHistory, setRequestHistory] = useState<RequestHistoryEntry[]>(
+    loadHistory,
+  );
+  const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const historyDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  useEffect(() => {
+    saveHistory(requestHistory);
+  }, [requestHistory]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        historyDropdownOpen &&
+        historyDropdownRef.current &&
+        !historyDropdownRef.current.contains(e.target as Node)
+      ) {
+        setHistoryDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [historyDropdownOpen]);
+
+  const addToHistory = (
+    method: string,
+    finalUrl: string,
+    status: number,
+    time_ms: number,
+  ) => {
+    const entry: RequestHistoryEntry = {
+      id: crypto.randomUUID(),
+      method,
+      url: finalUrl,
+      timestamp: Date.now(),
+      status,
+      time_ms,
+    };
+    setRequestHistory((prev) => {
+      const next = [entry, ...prev].slice(0, HISTORY_MAX_ITEMS);
+      return next;
+    });
+  };
+
+  const applyHistoryEntry = (entry: RequestHistoryEntry) => {
+    setMethod(entry.method);
+    setUrl(entry.url);
+    setHistoryDropdownOpen(false);
+  };
+
+  const clearHistory = () => {
+    setRequestHistory([]);
+    setHistoryDropdownOpen(false);
+  };
 
   async function sendChatMessage() {
     const text = chatInput.trim();
@@ -172,6 +267,7 @@ function App() {
         setLastResponseHeaders(res.headers);
       }
       setResponse(JSON.stringify(resData, null, 2));
+      addToHistory(method, finalUrl, res.status, res.time_ms);
     } catch (error) {
       setResponse(JSON.stringify({ error }, null, 2));
     }
@@ -429,7 +525,7 @@ function App() {
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-xl shrink-0 z-10"
+        className="relative flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/80 backdrop-blur-xl shrink-0 z-20"
       >
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2.5">
@@ -451,13 +547,77 @@ function App() {
           </div>
         </div>
         <div className="flex gap-4">
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-            className="text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
-          >
-            <History className="w-5 h-5" />
-          </motion.button>
+          <div ref={historyDropdownRef} className="relative">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setHistoryDropdownOpen((o) => !o)}
+              className={`transition-colors cursor-pointer ${historyDropdownOpen ? "text-slate-900" : "text-slate-400 hover:text-slate-900"}`}
+              title="Request history"
+              aria-label="Request history"
+            >
+              <History className="w-5 h-5" />
+            </motion.button>
+            <AnimatePresence>
+              {historyDropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-full mt-2 w-80 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-xl z-50 flex flex-col"
+                >
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 shrink-0">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Recent requests
+                    </span>
+                    {requestHistory.length > 0 && (
+                      <button
+                        onClick={clearHistory}
+                        className="text-[11px] text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="overflow-y-auto min-h-0 flex-1 py-1">
+                    {requestHistory.length === 0 ? (
+                      <div className="px-4 py-8 text-center text-sm text-slate-400">
+                        No requests yet. Send one to see it here.
+                      </div>
+                    ) : (
+                      requestHistory.map((entry) => (
+                        <button
+                          key={entry.id}
+                          onClick={() => applyHistoryEntry(entry)}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors cursor-pointer flex flex-col gap-0.5 group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 shrink-0">
+                              {entry.method}
+                            </span>
+                            <span className="text-xs text-slate-500 shrink-0">
+                              {formatRelativeTime(entry.timestamp)}
+                            </span>
+                            {entry.status != null && (
+                              <span
+                                className={`text-[10px] ml-auto shrink-0 ${entry.status >= 200 && entry.status < 300 ? "text-emerald-600" : "text-rose-600"}`}
+                              >
+                                {entry.status}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-sm text-slate-800 font-mono truncate group-hover:text-slate-900">
+                            {entry.url}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.95 }}
