@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Send,
@@ -10,6 +10,7 @@ import {
   Plus,
   FileInput,
   ChevronDown,
+  Layers,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import logoSvg from "/logo.svg";
@@ -37,7 +38,203 @@ const HISTORY_STORAGE_KEY = "ziip-request-history";
 const LLM_PROVIDER_STORAGE = "ziip-llm-provider";
 const GEMINI_API_KEY_STORAGE = "ziip-gemini-api-key";
 const OPENAI_API_KEY_STORAGE = "ziip-openai-api-key";
+const ENVIRONMENTS_STORAGE_KEY = "ziip-environments";
+const ACTIVE_ENVIRONMENT_STORAGE_KEY = "ziip-active-environment";
 const HISTORY_MAX_ITEMS = 50;
+
+type EnvironmentVariable = { id: string; key: string; value: string };
+type Environment = {
+  id: string;
+  name: string;
+  variables: EnvironmentVariable[];
+};
+
+function substituteVariables(
+  text: string,
+  vars: Record<string, string>,
+): { resolved: string; unresolved: string[] } {
+  const unresolved: string[] = [];
+  const resolved = text.replace(/\{\{([^}]+)\}\}/g, (_, name) => {
+    const key = name.trim();
+    if (key && vars[key] !== undefined) return vars[key];
+    if (key && !unresolved.includes(key)) unresolved.push(key);
+    return `{{${key}}}`;
+  });
+  return { resolved, unresolved };
+}
+
+function getActiveEnvVariables(
+  environments: Environment[],
+  activeId: string | null,
+): Record<string, string> {
+  if (!activeId) return {};
+  const env = environments.find((e) => e.id === activeId);
+  if (!env) return {};
+  const out: Record<string, string> = {};
+  for (const v of env.variables) {
+    if (v.key.trim()) out[v.key.trim()] = v.value;
+  }
+  return out;
+}
+
+function loadEnvironments(): Environment[] {
+  try {
+    const raw = localStorage.getItem(ENVIRONMENTS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveEnvironments(envs: Environment[]) {
+  try {
+    localStorage.setItem(ENVIRONMENTS_STORAGE_KEY, JSON.stringify(envs));
+  } catch {}
+}
+
+function resolveRequestData(
+  vars: Record<string, string>,
+  url: string,
+  params: KeyValuePair[],
+  headers: KeyValuePair[],
+  bodyContent: string,
+  authType: "None" | "Bearer" | "Basic",
+  bearerToken: string,
+  basicUsername: string,
+  basicPassword: string,
+): {
+  finalUrl: string;
+  compiledHeaders: Record<string, string>;
+  body: string;
+  contextParams: { key: string; value: string }[];
+  unresolved: string[];
+} {
+  const allUnresolved: string[] = [];
+  const addUnresolved = (u: string[]) => {
+    for (const name of u) if (!allUnresolved.includes(name)) allUnresolved.push(name);
+  };
+  const sub = (text: string) => {
+    const r = substituteVariables(text, vars);
+    addUnresolved(r.unresolved);
+    return r.resolved;
+  };
+
+  let resolvedUrl = sub(url);
+  const compiledHeaders: Record<string, string> = {};
+  for (const h of headers) {
+    if (h.enabled && h.key) {
+      compiledHeaders[sub(h.key)] = sub(h.value);
+    }
+  }
+  if (authType === "Bearer" && bearerToken) {
+    const t = sub(bearerToken);
+    compiledHeaders["Authorization"] = `Bearer ${t.trim()}`;
+  } else if (authType === "Basic" && (basicUsername || basicPassword)) {
+    compiledHeaders["Authorization"] =
+      `Basic ${btoa(`${sub(basicUsername)}:${sub(basicPassword)}`)}`;
+  }
+  const resolvedBody = sub(bodyContent);
+  const contextParams = params
+    .filter((p) => p.enabled && p.key)
+    .map((p) => ({ key: sub(p.key), value: sub(p.value) }));
+
+  let finalUrl = resolvedUrl;
+  try {
+    const urlObj = new URL(resolvedUrl.includes("://") ? resolvedUrl : `https://${resolvedUrl}`);
+    for (const p of contextParams) urlObj.searchParams.append(p.key, p.value);
+    finalUrl = urlObj.toString();
+  } catch {}
+
+  return {
+    finalUrl,
+    compiledHeaders,
+    body: resolvedBody,
+    contextParams,
+    unresolved: allUnresolved,
+  };
+}
+
+function renderHighlightedText(text: string): React.ReactNode {
+  if (!text.includes("{{")) return text;
+  const parts: React.ReactNode[] = [];
+  const regex = /\{\{([^}]*)\}\}/g;
+  let lastIdx = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
+    parts.push(
+      <span
+        key={match.index}
+        className="text-violet-600 bg-violet-50 rounded-[3px] px-[2px] ring-1 ring-inset ring-violet-200/80"
+      >
+        {match[0]}
+      </span>,
+    );
+    lastIdx = regex.lastIndex;
+  }
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return <>{parts}</>;
+}
+
+function VarInput({
+  value,
+  className = "",
+  wrapperClassName = "",
+  mirrorPadding = "px-3 py-1.5",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  wrapperClassName?: string;
+  mirrorPadding?: string;
+}) {
+  const text = String(value ?? "");
+  const hasVars = /\{\{[^}]*\}\}/.test(text);
+  if (!hasVars) return <input {...props} value={value} className={className} />;
+  return (
+    <div className={`relative ${wrapperClassName}`}>
+      <input
+        {...props}
+        value={value}
+        className={`${className} !text-transparent caret-slate-900 selection:bg-violet-200/50`}
+      />
+      <div
+        className={`absolute inset-0 ${mirrorPadding} text-sm font-mono pointer-events-none overflow-hidden whitespace-nowrap text-slate-900 flex items-center`}
+        aria-hidden="true"
+      >
+        {renderHighlightedText(text)}
+      </div>
+    </div>
+  );
+}
+
+function VarTextarea({
+  value,
+  className = "",
+  mirrorPadding = "p-4",
+  ...props
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  mirrorPadding?: string;
+}) {
+  const text = String(value ?? "");
+  const hasVars = /\{\{[^}]*\}\}/.test(text);
+  if (!hasVars) return <textarea {...props} value={value} className={className} />;
+  return (
+    <div className="relative w-full h-full">
+      <textarea
+        {...props}
+        value={value}
+        className={`${className} !text-transparent caret-slate-900 selection:bg-violet-200/50`}
+      />
+      <div
+        className={`absolute inset-0 ${mirrorPadding} text-sm font-mono pointer-events-none overflow-auto whitespace-pre-wrap text-slate-800`}
+        aria-hidden="true"
+      >
+        {renderHighlightedText(text)}
+      </div>
+    </div>
+  );
+}
 
 const LLM_PROVIDERS = [
   { id: "gemini", label: "Gemini (Google)", keyHint: "AIza...", keyUrl: "ai.google.dev" },
@@ -142,6 +339,10 @@ function App() {
   );
   const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [environments, setEnvironments] = useState<Environment[]>(loadEnvironments);
+  const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(
+    () => localStorage.getItem(ACTIVE_ENVIRONMENT_STORAGE_KEY),
+  );
   const [settingsProvider, setSettingsProvider] = useState<LLMProviderId>(
     () => (localStorage.getItem(LLM_PROVIDER_STORAGE) as LLMProviderId) ?? "gemini",
   );
@@ -149,6 +350,11 @@ function App() {
     () => localStorage.getItem(GEMINI_API_KEY_STORAGE) ?? "",
   );
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"General" | "Environments">(
+    "General",
+  );
+  const [envDropdownOpen, setEnvDropdownOpen] = useState(false);
+  const envDropdownRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const historyDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -170,15 +376,29 @@ function App() {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (!historyDropdownOpen) return;
       const target = e.target as Node;
-      if (historyDropdownRef.current && !historyDropdownRef.current.contains(target)) {
+      if (historyDropdownOpen && historyDropdownRef.current && !historyDropdownRef.current.contains(target)) {
         setHistoryDropdownOpen(false);
+      }
+      if (envDropdownOpen && envDropdownRef.current && !envDropdownRef.current.contains(target)) {
+        setEnvDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [historyDropdownOpen]);
+  }, [historyDropdownOpen, envDropdownOpen]);
+
+  useEffect(() => {
+    saveEnvironments(environments);
+  }, [environments]);
+
+  useEffect(() => {
+    if (activeEnvironmentId) {
+      localStorage.setItem(ACTIVE_ENVIRONMENT_STORAGE_KEY, activeEnvironmentId);
+    } else {
+      localStorage.removeItem(ACTIVE_ENVIRONMENT_STORAGE_KEY);
+    }
+  }, [activeEnvironmentId]);
 
   const addToHistory = (
     method: string,
@@ -230,33 +450,27 @@ function App() {
           `${LLM_PROVIDERS.find((p) => p.id === provider)?.label ?? provider} API key not found. Open Settings (gear icon), paste your key, then click Save.`,
         );
       }
-      let finalUrl = url;
-      try {
-        const urlObj = new URL(url.includes("://") ? url : `https://${url}`);
-        params.forEach((p) => {
-          if (p.enabled && p.key) urlObj.searchParams.append(p.key, p.value);
-        });
-        finalUrl = urlObj.toString();
-      } catch {}
-
-      const compiledHeaders: Record<string, string> = {};
-      headers.forEach((h) => {
-        if (h.enabled && h.key) compiledHeaders[h.key] = h.value;
-      });
-      if (authType === "Bearer" && bearerToken) {
-        compiledHeaders["Authorization"] = `Bearer ${bearerToken.trim()}`;
-      } else if (authType === "Basic" && (basicUsername || basicPassword)) {
-        compiledHeaders["Authorization"] =
-          `Basic ${btoa(`${basicUsername}:${basicPassword}`)}`;
-      }
+      const vars = getActiveEnvVariables(environments, activeEnvironmentId);
+      const { finalUrl, compiledHeaders, body: resolvedBody, contextParams } =
+        resolveRequestData(
+          vars,
+          url,
+          params,
+          headers,
+          bodyContent,
+          authType,
+          bearerToken,
+          basicUsername,
+          basicPassword,
+        );
 
       const MAX_RESPONSE_BODY = 4000;
       const context = {
         url: finalUrl,
         method,
-        params: params.filter((p) => p.enabled && p.key).map((p) => ({ key: p.key, value: p.value })),
+        params: contextParams.length > 0 ? contextParams : undefined,
         headers: Object.keys(compiledHeaders).length > 0 ? compiledHeaders : undefined,
-        body: bodyContent.trim() || undefined,
+        body: resolvedBody.trim() || undefined,
         lastResponse: responseMeta
           ? {
               status: responseMeta.status,
@@ -301,36 +515,41 @@ function App() {
   }
 
   async function makeRequest() {
+    const vars = getActiveEnvVariables(environments, activeEnvironmentId);
+    const { finalUrl, compiledHeaders, body: resolvedBody, unresolved } =
+      resolveRequestData(
+        vars,
+        url,
+        params,
+        headers,
+        bodyContent,
+        authType,
+        bearerToken,
+        basicUsername,
+        basicPassword,
+      );
+
+    if (unresolved.length > 0) {
+      setResponse(
+        JSON.stringify(
+          {
+            error: `Unresolved variables: ${unresolved.join(", ")}. Add them in Settings → Environments.`,
+          },
+          null,
+          2,
+        ),
+      );
+      setResponseMeta(null);
+      return;
+    }
+
     setResponse("Loading...");
     setResponseMeta(null);
     try {
-      let finalUrl = url;
-      try {
-        const urlObj = new URL(url.includes("://") ? url : `https://${url}`);
-        params.forEach((p) => {
-          if (p.enabled && p.key) urlObj.searchParams.append(p.key, p.value);
-        });
-        finalUrl = urlObj.toString();
-      } catch (e) {
-        // Fallback for invalid URLs
-      }
-
-      const compiledHeaders: Record<string, string> = {};
-      headers.forEach((h) => {
-        if (h.enabled && h.key) compiledHeaders[h.key] = h.value;
-      });
-
-      if (authType === "Bearer" && bearerToken) {
-        compiledHeaders["Authorization"] = `Bearer ${bearerToken.trim()}`;
-      } else if (authType === "Basic" && (basicUsername || basicPassword)) {
-        compiledHeaders["Authorization"] =
-          `Basic ${btoa(`${basicUsername}:${basicPassword}`)}`;
-      }
-
       const res: any = await invoke("make_request", {
         method,
         url: finalUrl,
-        body: bodyContent,
+        body: resolvedBody,
         headers: compiledHeaders,
       });
 
@@ -517,7 +736,7 @@ function App() {
                 }}
                 className="w-4 h-4 bg-white border border-slate-300 rounded text-slate-800 focus:ring-slate-400/50 cursor-pointer accent-slate-800 transition-colors"
               />
-              <input
+              <VarInput
                 type="text"
                 value={item.key}
                 placeholder="Key"
@@ -538,8 +757,9 @@ function App() {
                   }
                 }}
                 className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
+                wrapperClassName="flex-1 min-w-0"
               />
-              <input
+              <VarInput
                 type="text"
                 value={item.value}
                 placeholder="Value"
@@ -560,6 +780,7 @@ function App() {
                   }
                 }}
                 className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
+                wrapperClassName="flex-1 min-w-0"
               />
               <button
                 onClick={() => {
@@ -629,6 +850,74 @@ function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          <div ref={envDropdownRef} className="relative flex items-center">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setEnvDropdownOpen((o) => !o)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+              title="Environment"
+              aria-label="Select environment"
+            >
+              <Layers className="w-4 h-4 text-slate-500" />
+              <span className="text-slate-600 max-w-[100px] truncate">
+                {activeEnvironmentId
+                  ? environments.find((e) => e.id === activeEnvironmentId)?.name ?? "Unknown"
+                  : "No env"}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </motion.button>
+            <AnimatePresence>
+              {envDropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-full mt-2 w-56 max-h-64 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-xl z-[100] flex flex-col"
+                >
+                  <div className="px-3 py-2 border-b border-slate-200 shrink-0">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Environment
+                    </span>
+                  </div>
+                  <div className="overflow-y-auto py-1">
+                    <button
+                      onClick={() => {
+                        setActiveEnvironmentId(null);
+                        setEnvDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${!activeEnvironmentId ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      No environment
+                    </button>
+                    {environments.map((env) => (
+                      <button
+                        key={env.id}
+                        onClick={() => {
+                          setActiveEnvironmentId(env.id);
+                          setEnvDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${activeEnvironmentId === env.id ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        {env.name}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => {
+                        setSettingsOpen(true);
+                        setSettingsTab("Environments");
+                        setEnvDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors cursor-pointer border-t border-slate-100"
+                    >
+                      Manage environments…
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div ref={historyDropdownRef} className="relative flex items-center">
             <motion.button
               whileHover={{ scale: 1.1 }}
@@ -733,11 +1022,27 @@ function App() {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6"
+              className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col p-6"
             >
-              <h3 className="text-lg font-semibold text-slate-900 mb-4">
+              <h3 className="text-lg font-semibold text-slate-900 mb-4 shrink-0">
                 Settings
               </h3>
+              <div className="flex gap-2 border-b border-slate-200 mb-4 shrink-0">
+                <button
+                  onClick={() => setSettingsTab("General")}
+                  className={`text-sm font-medium pb-2 px-1 transition-colors cursor-pointer ${settingsTab === "General" ? "text-slate-900 border-b-2 border-slate-900" : "text-slate-500 hover:text-slate-800"}`}
+                >
+                  General
+                </button>
+                <button
+                  onClick={() => setSettingsTab("Environments")}
+                  className={`text-sm font-medium pb-2 px-1 transition-colors cursor-pointer ${settingsTab === "Environments" ? "text-slate-900 border-b-2 border-slate-900" : "text-slate-500 hover:text-slate-800"}`}
+                >
+                  Environments
+                </button>
+              </div>
+              {settingsTab === "General" && (
+                <>
               <div className="space-y-2 mb-4">
                 <label className="block text-sm font-medium text-slate-600">
                   LLM Provider
@@ -803,6 +1108,174 @@ function App() {
                   Cancel
                 </motion.button>
               </div>
+                </>
+              )}
+              {settingsTab === "Environments" && (
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                  <p className="text-sm text-slate-500 mb-3">
+                    Use <code className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">{`{{variableName}}`}</code> in URL, params, headers, and body to substitute values.
+                  </p>
+                  <div className="flex-1 overflow-y-auto space-y-3 min-h-0">
+                    {environments.map((env) => (
+                      <div
+                        key={env.id}
+                        className="border border-slate-200 rounded-lg p-4 bg-slate-50/50"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <input
+                            type="text"
+                            value={env.name}
+                            onChange={(e) =>
+                              setEnvironments((prev) =>
+                                prev.map((x) =>
+                                  x.id === env.id
+                                    ? { ...x, name: e.target.value }
+                                    : x,
+                                ),
+                              )
+                            }
+                            placeholder="Environment name"
+                            className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                          />
+                          <button
+                            onClick={() => {
+                              setEnvironments((prev) =>
+                                prev.filter((x) => x.id !== env.id),
+                              );
+                              if (activeEnvironmentId === env.id)
+                                setActiveEnvironmentId(null);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-slate-100 rounded transition-colors cursor-pointer ml-2"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {env.variables.map((v) => (
+                            <div key={v.id} className="flex gap-2">
+                              <input
+                                type="text"
+                                value={v.key}
+                                onChange={(e) =>
+                                  setEnvironments((prev) =>
+                                    prev.map((x) =>
+                                      x.id === env.id
+                                        ? {
+                                            ...x,
+                                            variables: x.variables.map((vb) =>
+                                              vb.id === v.id
+                                                ? { ...vb, key: e.target.value }
+                                                : vb,
+                                            ),
+                                          }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                                placeholder="Key (e.g. baseUrl)"
+                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                              />
+                              <input
+                                type="text"
+                                value={v.value}
+                                onChange={(e) =>
+                                  setEnvironments((prev) =>
+                                    prev.map((x) =>
+                                      x.id === env.id
+                                        ? {
+                                            ...x,
+                                            variables: x.variables.map((vb) =>
+                                              vb.id === v.id
+                                                ? {
+                                                    ...vb,
+                                                    value: e.target.value,
+                                                  }
+                                                : vb,
+                                            ),
+                                          }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                                placeholder="Value"
+                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                              />
+                              <button
+                                onClick={() =>
+                                  setEnvironments((prev) =>
+                                    prev.map((x) =>
+                                      x.id === env.id
+                                        ? {
+                                            ...x,
+                                            variables: x.variables.filter(
+                                              (vb) => vb.id !== v.id,
+                                            ),
+                                          }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                                className="p-1.5 text-slate-400 hover:text-rose-500 rounded transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            onClick={() =>
+                              setEnvironments((prev) =>
+                                prev.map((x) =>
+                                  x.id === env.id
+                                    ? {
+                                        ...x,
+                                        variables: [
+                                          ...x.variables,
+                                          {
+                                            id: crypto.randomUUID(),
+                                            key: "",
+                                            value: "",
+                                          },
+                                        ],
+                                      }
+                                    : x,
+                                ),
+                              )
+                            }
+                            className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Add variable
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    <motion.button
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() =>
+                        setEnvironments((prev) => [
+                          ...prev,
+                          {
+                            id: crypto.randomUUID(),
+                            name: "New Environment",
+                            variables: [
+                              {
+                                id: crypto.randomUUID(),
+                                key: "",
+                                value: "",
+                              },
+                            ],
+                          },
+                        ])
+                      }
+                      className="w-full flex items-center justify-center gap-2 py-3 border border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:text-slate-700 hover:border-slate-400 hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add environment
+                    </motion.button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -835,13 +1308,15 @@ function App() {
                 <option className="bg-white text-slate-900">PATCH</option>
               </select>
               <div className="w-px bg-slate-200 my-2" />
-              <input
+              <VarInput
                 type="text"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && makeRequest()}
                 placeholder="https://api.example.com/v1/users"
                 className="flex-1 bg-transparent border-none px-2 py-2 text-sm focus:outline-none font-mono text-slate-900 placeholder:text-slate-400"
+                wrapperClassName="flex-1 min-w-0"
+                mirrorPadding="px-2 py-2"
               />
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -982,7 +1457,7 @@ function App() {
                     renderKeyValueEditor(params, setParams)}
 
                   {activeTab === "Body" && (
-                    <textarea
+                    <VarTextarea
                       value={bodyContent}
                       onChange={(e) => setBodyContent(e.target.value)}
                       placeholder='{\n  "key": "value"\n}'
@@ -1033,12 +1508,13 @@ function App() {
                             <label className="text-sm text-slate-500 w-24 flex-shrink-0 flex items-center">
                               Token
                             </label>
-                            <input
+                            <VarInput
                               type="text"
                               value={bearerToken}
                               onChange={(e) => setBearerToken(e.target.value)}
                               placeholder="eyJhbGci..."
                               className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 min-w-0 font-mono shadow-sm transition-all"
+                              wrapperClassName="flex-1 min-w-0"
                             />
                           </motion.div>
                         )}
@@ -1056,26 +1532,28 @@ function App() {
                               <label className="text-sm text-slate-500 w-24 flex items-center">
                                 Username
                               </label>
-                              <input
+                              <VarInput
                                 type="text"
                                 value={basicUsername}
                                 onChange={(e) =>
                                   setBasicUsername(e.target.value)
                                 }
-                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 shadow-sm transition-all"
+                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
+                                wrapperClassName="flex-1 min-w-0"
                               />
                             </div>
                             <div className="flex gap-2">
                               <label className="text-sm text-slate-500 w-24 flex items-center">
                                 Password
                               </label>
-                              <input
-                                type="password"
+                              <VarInput
+                                type="text"
                                 value={basicPassword}
                                 onChange={(e) =>
                                   setBasicPassword(e.target.value)
                                 }
-                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 shadow-sm transition-all"
+                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
+                                wrapperClassName="flex-1 min-w-0"
                               />
                             </div>
                           </motion.div>
