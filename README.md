@@ -1,6 +1,19 @@
 # ZIIP
 
 <p align="center">
+  <svg xmlns="http://www.w3.org/2000/svg" width="140" height="72" viewBox="0 0 140 72">
+    <defs>
+      <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#1e40af"/>
+        <stop offset="50%" stop-color="#3b82f6"/>
+        <stop offset="100%" stop-color="#0ea5e9"/>
+      </linearGradient>
+    </defs>
+    <text x="70" y="52" font-size="56" font-weight="700" font-family="system-ui, -apple-system, sans-serif" fill="url(#blueGrad)" text-anchor="middle">ZII</text>
+  </svg>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/version-0.1.0--alpha-9333ea?style=for-the-badge&labelColor=1e293b" alt="Version" />
   <img src="https://img.shields.io/badge/Tauri-2.0-FFC131?style=for-the-badge&logo=tauri&logoColor=000" alt="Tauri" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=000" alt="React" />
