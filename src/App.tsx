@@ -438,7 +438,7 @@ function App() {
                              <textarea
                                value={headersBulkPasteText}
                                onChange={(e) => setHeadersBulkPasteText(e.target.value)}
-                               placeholder="Content-Type: application/json&#10;Accept: application/json&#10;X-Custom: value"
+                               placeholder={`Content-Type: application/json\nAccept: application/json\nX-Custom: value`}
                                className="flex-1 h-20 resize-y bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
                                autoFocus
                              />
