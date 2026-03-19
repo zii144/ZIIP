@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import logoSvg from "/logo.svg";
+import { Dropdown } from "@/components/ui/dropdown";
 import "./App.css";
 
 type KeyValuePair = {
@@ -985,7 +986,7 @@ function App() {
                     ]);
                   }
                 }}
-                className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
+                className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
                 wrapperClassName="flex-1 min-w-0"
               />
               <VarInput
@@ -1008,7 +1009,7 @@ function App() {
                     ]);
                   }
                 }}
-                className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
+                className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-900 placeholder:text-slate-400 font-mono shadow-sm transition-all"
                 wrapperClassName="flex-1 min-w-0"
               />
               <button
@@ -1472,7 +1473,7 @@ function App() {
                   onChange={(e) => setNewCollectionName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && newCollectionName.trim() && createCollection()}
                   placeholder="e.g. Auth API, User Service"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400"
                   autoFocus
                 />
               </div>
@@ -1530,20 +1531,13 @@ function App() {
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-1">
-                    Collection
-                  </label>
-                  <select
+                  <Dropdown
+                    label="Collection"
                     value={saveRequestCollectionId ?? ""}
-                    onChange={(e) => setSaveRequestCollectionId(e.target.value || null)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
-                  >
-                    {collections.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setSaveRequestCollectionId(v || null)}
+                    options={collections.map((c) => ({ value: c.id, label: c.name }))}
+                    placeholder="Select collection"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-600 mb-1">
@@ -1554,7 +1548,7 @@ function App() {
                     value={saveRequestName}
                     onChange={(e) => setSaveRequestName(e.target.value)}
                     placeholder={`${method} ${url}`.slice(0, 50)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400"
                   />
                 </div>
               </div>
@@ -1633,26 +1627,17 @@ function App() {
               {settingsTab === "General" && (
                 <>
               <div className="space-y-2 mb-4">
-                <label className="block text-sm font-medium text-slate-600">
-                  LLM Provider
-                </label>
-                <select
+                <Dropdown
+                  label="LLM Provider"
                   value={settingsProvider}
-                  onChange={(e) => {
-                    const newProvider = e.target.value as LLMProviderId;
+                  onChange={(newProvider) => {
                     const currentKey = settingsApiKey.trim();
                     if (currentKey) localStorage.setItem(getApiKeyStorageKey(settingsProvider), currentKey);
-                    setSettingsProvider(newProvider);
-                    setSettingsApiKey(localStorage.getItem(getApiKeyStorageKey(newProvider)) ?? "");
+                    setSettingsProvider(newProvider as LLMProviderId);
+                    setSettingsApiKey(localStorage.getItem(getApiKeyStorageKey(newProvider as LLMProviderId)) ?? "");
                   }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
-                >
-                  {LLM_PROVIDERS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                  options={LLM_PROVIDERS.map((p) => ({ value: p.id, label: p.label }))}
+                />
               </div>
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-slate-600">
@@ -1663,7 +1648,7 @@ function App() {
                   value={settingsApiKey}
                   onChange={(e) => setSettingsApiKey(e.target.value)}
                   placeholder={LLM_PROVIDERS.find((p) => p.id === settingsProvider)?.keyHint ?? "sk-..."}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400"
                   autoComplete="off"
                 />
                 <p className="text-xs text-slate-500">
@@ -1724,7 +1709,7 @@ function App() {
                               )
                             }
                             placeholder="Environment name"
-                            className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                            className="flex-1 px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 bg-white"
                           />
                           <button
                             onClick={() => {
@@ -1762,7 +1747,7 @@ function App() {
                                   )
                                 }
                                 placeholder="Key (e.g. baseUrl)"
-                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 bg-white"
                               />
                               <input
                                 type="text"
@@ -1787,7 +1772,7 @@ function App() {
                                   )
                                 }
                                 placeholder="Value"
-                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                                className="flex-1 px-2 py-1.5 border border-slate-200 rounded text-xs font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 bg-white"
                               />
                               <button
                                 onClick={() =>
@@ -1906,18 +1891,20 @@ function App() {
                 </button>
               </motion.div>
             )}
-            <div className="flex gap-2 p-1 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-slate-400 focus-within:ring-1 focus-within:ring-slate-400 transition-all shadow-sm">
-              <select
-                className="bg-transparent text-slate-700 border-none px-4 py-2 text-sm font-bold focus:outline-none cursor-pointer hover:bg-slate-200/50 rounded-lg transition-colors appearance-none"
+            <div className="flex gap-2 p-1 bg-slate-50 border border-slate-200 rounded-xl focus-within:border-slate-400 focus-within:ring-1 focus-within:ring-inset focus-within:ring-slate-400 transition-all shadow-sm">
+              <Dropdown
+                variant="ghost"
                 value={method}
-                onChange={(e) => setMethod(e.target.value)}
-              >
-                <option className="bg-white text-slate-900">GET</option>
-                <option className="bg-white text-slate-900">POST</option>
-                <option className="bg-white text-slate-900">PUT</option>
-                <option className="bg-white text-slate-900">DELETE</option>
-                <option className="bg-white text-slate-900">PATCH</option>
-              </select>
+                onChange={(v) => setMethod(v)}
+                options={[
+                  { value: "GET", label: "GET" },
+                  { value: "POST", label: "POST" },
+                  { value: "PUT", label: "PUT" },
+                  { value: "DELETE", label: "DELETE" },
+                  { value: "PATCH", label: "PATCH" },
+                ]}
+                className="shrink-0"
+              />
               <div className="w-px bg-slate-200 my-2" />
               <VarInput
                 type="text"
@@ -1989,28 +1976,17 @@ function App() {
                     <div className="flex flex-col gap-3 h-full min-h-0">
                       {/* Headers toolbar */}
                       <div className="flex flex-wrap gap-2 shrink-0">
-                        <div className="relative group">
-                          <select
-                            onChange={(e) => {
-                              const idx = e.target.selectedIndex;
-                              const opt = e.target.options[idx];
-                              const preset = HEADER_PRESETS.find(
-                                (p) => p.label === opt?.value,
-                              );
-                              if (preset) addHeaderPreset(preset);
-                              e.target.selectedIndex = 0;
-                            }}
-                            className="appearance-none bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 cursor-pointer shadow-sm"
-                          >
-                            <option value="">Add preset…</option>
-                            {HEADER_PRESETS.map((p) => (
-                              <option key={p.key} value={p.label}>
-                                {p.label}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-                        </div>
+                        <Dropdown
+                          variant="compact"
+                          value=""
+                          onChange={(label) => {
+                            const preset = HEADER_PRESETS.find((p) => p.label === label);
+                            if (preset) addHeaderPreset(preset);
+                          }}
+                          placeholder="Add preset…"
+                          options={HEADER_PRESETS.map((p) => ({ value: p.label, label: p.label }))}
+                          resetAfterSelect
+                        />
                         <motion.button
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
@@ -2051,7 +2027,7 @@ function App() {
                                 setHeadersBulkPasteText(e.target.value)
                               }
                               placeholder={`Content-Type: application/json\nAccept: application/json\nX-Custom: value`}
-                              className="flex-1 h-20 resize-y bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                              className="flex-1 h-20 resize-y bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400"
                               autoFocus
                             />
                             <div className="flex flex-col gap-1">
@@ -2088,40 +2064,27 @@ function App() {
                       value={bodyContent}
                       onChange={(e) => setBodyContent(e.target.value)}
                       placeholder='{\n  "key": "value"\n}'
-                      className="w-full h-full bg-white border border-slate-200 rounded-xl p-4 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 placeholder:text-slate-400 font-mono resize-none shadow-sm transition-all"
+                      className="w-full h-full bg-white border border-slate-200 rounded-xl p-4 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-800 placeholder:text-slate-400 font-mono resize-none shadow-sm transition-all"
                     />
                   )}
 
                   {activeTab === "Auth" && (
                     <div className="flex flex-col gap-4">
                       <div className="flex gap-2">
-                        <label className="text-sm text-slate-500 w-24 flex items-center">
+                        <label className="text-sm text-slate-500 w-24 flex items-center shrink-0">
                           Auth Type
                         </label>
-                        <select
+                        <Dropdown
+                          variant="default"
                           value={authType}
-                          onChange={(e) => setAuthType(e.target.value as any)}
-                          className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 shadow-sm transition-all"
-                        >
-                          <option
-                            className="bg-white text-slate-900"
-                            value="None"
-                          >
-                            None
-                          </option>
-                          <option
-                            className="bg-white text-slate-900"
-                            value="Bearer"
-                          >
-                            Bearer Token
-                          </option>
-                          <option
-                            className="bg-white text-slate-900"
-                            value="Basic"
-                          >
-                            Basic Auth
-                          </option>
-                        </select>
+                          onChange={(v) => setAuthType(v as "None" | "Bearer" | "Basic")}
+                          options={[
+                            { value: "None", label: "None" },
+                            { value: "Bearer", label: "Bearer Token" },
+                            { value: "Basic", label: "Basic Auth" },
+                          ]}
+                          className="flex-1"
+                        />
                       </div>
 
                       <AnimatePresence>
@@ -2140,7 +2103,7 @@ function App() {
                               value={bearerToken}
                               onChange={(e) => setBearerToken(e.target.value)}
                               placeholder="eyJhbGci..."
-                              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 min-w-0 font-mono shadow-sm transition-all"
+                              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-800 flex-1 min-w-0 font-mono shadow-sm transition-all"
                               wrapperClassName="flex-1 min-w-0"
                             />
                           </motion.div>
@@ -2165,7 +2128,7 @@ function App() {
                                 onChange={(e) =>
                                   setBasicUsername(e.target.value)
                                 }
-                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
+                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
                                 wrapperClassName="flex-1 min-w-0"
                               />
                             </div>
@@ -2179,7 +2142,7 @@ function App() {
                                 onChange={(e) =>
                                   setBasicPassword(e.target.value)
                                 }
-                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
+                                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-inset focus:ring-slate-400 text-slate-800 flex-1 font-mono shadow-sm transition-all"
                                 wrapperClassName="flex-1 min-w-0"
                               />
                             </div>
@@ -2397,7 +2360,7 @@ function App() {
 
           {/* Chat Input */}
           <div className="px-4 py-4 border-t border-slate-200 bg-white/80 backdrop-blur-md shrink-0 relative z-10">
-            <div className="flex gap-2 items-end bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2 focus-within:border-slate-400 focus-within:ring-1 focus-within:ring-slate-400 transition-all shadow-sm">
+            <div className="flex gap-2 items-end bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2 focus-within:border-slate-400 focus-within:ring-1 focus-within:ring-inset focus-within:ring-slate-400 transition-all shadow-sm">
               <textarea
                 value={chatInput}
                 onChange={(e) => {
