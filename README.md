@@ -43,12 +43,12 @@
 
 ## Tech Stack
 
-| Layer        | Technology                         |
-| ------------ | ---------------------------------- |
-| **Desktop**  | Tauri 2                            |
-| **Frontend** | React 19, TypeScript, Vite 7       |
-| **Styling**  | Tailwind CSS 4, Framer Motion      |
-| **Backend**  | Rust (reqwest)                     |
+| Layer        | Technology                    |
+| ------------ | ----------------------------- |
+| **Desktop**  | Tauri 2                       |
+| **Frontend** | React 19, TypeScript, Vite 7  |
+| **Styling**  | Tailwind CSS 4, Framer Motion |
+| **Backend**  | Rust (reqwest)                |
 
 ## Getting Started
 
