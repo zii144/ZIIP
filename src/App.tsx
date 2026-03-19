@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Send, History, Settings, Trash2, ArrowUp, Copy } from "lucide-react";
+import { Send, History, Settings, Trash2, ArrowUp, Copy, Plus, FileInput, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import logoSvg from "/logo.svg";
 import "./App.css";
@@ -8,6 +8,14 @@ import "./App.css";
 type KeyValuePair = { id: string; key: string; value: string; enabled: boolean };
 
 type ChatMessage = { id: string; role: "user" | "assistant"; text: string };
+
+const HEADER_PRESETS: { label: string; key: string; value: string }[] = [
+  { label: "Content-Type JSON", key: "Content-Type", value: "application/json" },
+  { label: "Accept JSON", key: "Accept", value: "application/json" },
+  { label: "User-Agent", key: "User-Agent", value: "ZIIP/0.1" },
+  { label: "Cache No-Store", key: "Cache-Control", value: "no-cache, no-store" },
+  { label: "X-Requested-With", key: "X-Requested-With", value: "XMLHttpRequest" },
+];
 
 function App() {
   const [url, setUrl] = useState("https://httpbin.org/get");
@@ -24,6 +32,9 @@ function App() {
   const [basicUsername, setBasicUsername] = useState("");
   const [basicPassword, setBasicPassword] = useState("");
 
+  const [lastResponseHeaders, setLastResponseHeaders] = useState<Record<string, string>>({});
+  const [headersBulkPasteOpen, setHeadersBulkPasteOpen] = useState(false);
+  const [headersBulkPasteText, setHeadersBulkPasteText] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: crypto.randomUUID(), role: "assistant", text: "Hello! I am ZII. Tell me what API endpoint you want to test, or ask me to generate a mock payload for your current request." }
@@ -100,6 +111,9 @@ function App() {
          resData.body = JSON.parse(res.body);
       } catch(e) {}
 
+      if (res.headers && typeof res.headers === "object") {
+        setLastResponseHeaders(res.headers);
+      }
       setResponse(JSON.stringify(resData, null, 2));
     } catch (error) {
        setResponse(JSON.stringify({ error }, null, 2));
@@ -143,6 +157,49 @@ function App() {
     }
     if (pos < text.length) spans.push(text.slice(pos));
     return spans;
+  };
+
+  const addHeaderPreset = (preset: { key: string; value: string }) => {
+    const newHeader = { id: crypto.randomUUID(), key: preset.key, value: preset.value, enabled: true };
+    setHeaders(prev => {
+      const withoutEmpty = prev.filter(h => h.key || h.value);
+      return [...withoutEmpty, newHeader, { id: crypto.randomUUID(), key: "", value: "", enabled: true }];
+    });
+  };
+
+  const parseBulkHeaders = (text: string): { key: string; value: string }[] => {
+    const lines = text.split(/\r?\n/);
+    const pairs: { key: string; value: string }[] = [];
+    for (const line of lines) {
+      const match = line.match(/^\s*([^:=\s]+)\s*[:=]\s*(.*)$/);
+      if (match) {
+        const key = match[1].trim();
+        const value = match[2].trim().replace(/^["']|["']$/g, "");
+        if (key) pairs.push({ key, value });
+      }
+    }
+    return pairs;
+  };
+
+  const applyBulkPasteHeaders = () => {
+    const pairs = parseBulkHeaders(headersBulkPasteText);
+    if (pairs.length === 0) return;
+    const newItems = pairs.map(p => ({ id: crypto.randomUUID(), ...p, enabled: true }));
+    setHeaders([...newItems, { id: crypto.randomUUID(), key: "", value: "", enabled: true }]);
+    setHeadersBulkPasteText("");
+    setHeadersBulkPasteOpen(false);
+  };
+
+  const importHeadersFromResponse = () => {
+    const entries = Object.entries(lastResponseHeaders);
+    if (entries.length === 0) return;
+    const newItems = entries.map(([key, value]) => ({
+      id: crypto.randomUUID(),
+      key,
+      value: String(value),
+      enabled: true,
+    }));
+    setHeaders([...newItems, { id: crypto.randomUUID(), key: "", value: "", enabled: true }]);
   };
 
   const copyResponse = async () => {
@@ -326,7 +383,88 @@ function App() {
                    transition={{ duration: 0.2 }}
                    className="h-full"
                  >
-                   {activeTab === "Headers" && renderKeyValueEditor(headers, setHeaders)}
+                   {activeTab === "Headers" && (
+                     <div className="flex flex-col gap-3 h-full min-h-0">
+                       {/* Headers toolbar */}
+                       <div className="flex flex-wrap gap-2 shrink-0">
+                         <div className="relative group">
+                           <select
+                             onChange={(e) => {
+                               const idx = e.target.selectedIndex;
+                               const opt = e.target.options[idx];
+                               const preset = HEADER_PRESETS.find(p => p.label === opt?.value);
+                               if (preset) addHeaderPreset(preset);
+                               e.target.selectedIndex = 0;
+                             }}
+                             className="appearance-none bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 cursor-pointer shadow-sm"
+                           >
+                             <option value="">Add preset…</option>
+                             {HEADER_PRESETS.map(p => (
+                               <option key={p.key} value={p.label}>{p.label}</option>
+                             ))}
+                           </select>
+                           <ChevronDown className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                         </div>
+                         <motion.button
+                           whileHover={{ scale: 1.02 }}
+                           whileTap={{ scale: 0.98 }}
+                           onClick={() => setHeadersBulkPasteOpen(!headersBulkPasteOpen)}
+                           className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors cursor-pointer"
+                         >
+                           <FileInput className="w-4 h-4" />
+                           Bulk paste
+                         </motion.button>
+                         <motion.button
+                           whileHover={{ scale: 1.02 }}
+                           whileTap={{ scale: 0.98 }}
+                           onClick={importHeadersFromResponse}
+                           disabled={Object.keys(lastResponseHeaders).length === 0}
+                           className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg hover:border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                           title="Import headers from last response"
+                         >
+                           <Plus className="w-4 h-4" />
+                           Import from response
+                         </motion.button>
+                       </div>
+
+                       {headersBulkPasteOpen && (
+                         <motion.div
+                           initial={{ opacity: 0, height: 0 }}
+                           animate={{ opacity: 1, height: "auto" }}
+                           exit={{ opacity: 0, height: 0 }}
+                           className="overflow-hidden"
+                         >
+                           <div className="flex gap-2">
+                             <textarea
+                               value={headersBulkPasteText}
+                               onChange={(e) => setHeadersBulkPasteText(e.target.value)}
+                               placeholder="Content-Type: application/json&#10;Accept: application/json&#10;X-Custom: value"
+                               className="flex-1 h-20 resize-y bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                               autoFocus
+                             />
+                             <div className="flex flex-col gap-1">
+                               <button
+                                 onClick={applyBulkPasteHeaders}
+                                 className="px-3 py-1.5 text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                               >
+                                 Apply
+                               </button>
+                               <button
+                                 onClick={() => { setHeadersBulkPasteOpen(false); setHeadersBulkPasteText(""); }}
+                                 className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                               >
+                                 Cancel
+                               </button>
+                             </div>
+                           </div>
+                         </motion.div>
+                       )}
+
+                       <div className="flex-1 min-h-0 overflow-hidden">
+                         {renderKeyValueEditor(headers, setHeaders)}
+                       </div>
+                     </div>
+                   )}
                    {activeTab === "Params" && renderKeyValueEditor(params, setParams)}
                    
                    {activeTab === "Body" && (
