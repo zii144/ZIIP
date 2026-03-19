@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Send,
@@ -35,7 +34,20 @@ type RequestHistoryEntry = {
 };
 
 const HISTORY_STORAGE_KEY = "ziip-request-history";
+const LLM_PROVIDER_STORAGE = "ziip-llm-provider";
+const GEMINI_API_KEY_STORAGE = "ziip-gemini-api-key";
+const OPENAI_API_KEY_STORAGE = "ziip-openai-api-key";
 const HISTORY_MAX_ITEMS = 50;
+
+const LLM_PROVIDERS = [
+  { id: "gemini", label: "Gemini (Google)", keyHint: "AIza...", keyUrl: "ai.google.dev" },
+  { id: "openai", label: "OpenAI (GPT)", keyHint: "sk-...", keyUrl: "platform.openai.com" },
+] as const;
+type LLMProviderId = (typeof LLM_PROVIDERS)[number]["id"];
+
+function getApiKeyStorageKey(provider: LLMProviderId): string {
+  return provider === "gemini" ? GEMINI_API_KEY_STORAGE : OPENAI_API_KEY_STORAGE;
+}
 
 function formatRelativeTime(ts: number): string {
   const sec = Math.floor((Date.now() - ts) / 1000);
@@ -129,11 +141,16 @@ function App() {
     loadHistory,
   );
   const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<LLMProviderId>(
+    () => (localStorage.getItem(LLM_PROVIDER_STORAGE) as LLMProviderId) ?? "gemini",
+  );
+  const [settingsApiKey, setSettingsApiKey] = useState(
+    () => localStorage.getItem(GEMINI_API_KEY_STORAGE) ?? "",
+  );
+  const [settingsSaved, setSettingsSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const historyDropdownRef = useRef<HTMLDivElement>(null);
-  const historyButtonRef = useRef<HTMLButtonElement>(null);
-  const historyDropdownContentRef = useRef<HTMLDivElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -144,22 +161,18 @@ function App() {
   }, [requestHistory]);
 
   useEffect(() => {
-    if (historyDropdownOpen && historyButtonRef.current) {
-      const rect = historyButtonRef.current.getBoundingClientRect();
-      setDropdownPosition({
-        top: rect.bottom + 8,
-        left: rect.right - 320,
-      });
+    if (settingsOpen) {
+      const provider = (localStorage.getItem(LLM_PROVIDER_STORAGE) as LLMProviderId) ?? "gemini";
+      setSettingsProvider(provider);
+      setSettingsApiKey(localStorage.getItem(getApiKeyStorageKey(provider)) ?? "");
     }
-  }, [historyDropdownOpen]);
+  }, [settingsOpen]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (!historyDropdownOpen) return;
       const target = e.target as Node;
-      const inButton = historyDropdownRef.current?.contains(target);
-      const inDropdown = historyDropdownContentRef.current?.contains(target);
-      if (!inButton && !inDropdown) {
+      if (historyDropdownRef.current && !historyDropdownRef.current.contains(target)) {
         setHistoryDropdownOpen(false);
       }
     }
@@ -210,21 +223,76 @@ function App() {
     setChatMessages((prev) => [...prev, userMsg]);
     setIsChatLoading(true);
     try {
-      // Stub: echo the user's message back as assistant response
-      // Replace this with a real invoke("chat", { message: text }) call when ready
-      await new Promise((r) => setTimeout(r, 600));
-      const reply = `You said: "${text}"`;
+      const provider = (localStorage.getItem(LLM_PROVIDER_STORAGE) as LLMProviderId) ?? "gemini";
+      const apiKey = localStorage.getItem(getApiKeyStorageKey(provider))?.trim();
+      if (!apiKey) {
+        throw new Error(
+          `${LLM_PROVIDERS.find((p) => p.id === provider)?.label ?? provider} API key not found. Open Settings (gear icon), paste your key, then click Save.`,
+        );
+      }
+      let finalUrl = url;
+      try {
+        const urlObj = new URL(url.includes("://") ? url : `https://${url}`);
+        params.forEach((p) => {
+          if (p.enabled && p.key) urlObj.searchParams.append(p.key, p.value);
+        });
+        finalUrl = urlObj.toString();
+      } catch {}
+
+      const compiledHeaders: Record<string, string> = {};
+      headers.forEach((h) => {
+        if (h.enabled && h.key) compiledHeaders[h.key] = h.value;
+      });
+      if (authType === "Bearer" && bearerToken) {
+        compiledHeaders["Authorization"] = `Bearer ${bearerToken.trim()}`;
+      } else if (authType === "Basic" && (basicUsername || basicPassword)) {
+        compiledHeaders["Authorization"] =
+          `Basic ${btoa(`${basicUsername}:${basicPassword}`)}`;
+      }
+
+      const MAX_RESPONSE_BODY = 4000;
+      const context = {
+        url: finalUrl,
+        method,
+        params: params.filter((p) => p.enabled && p.key).map((p) => ({ key: p.key, value: p.value })),
+        headers: Object.keys(compiledHeaders).length > 0 ? compiledHeaders : undefined,
+        body: bodyContent.trim() || undefined,
+        lastResponse: responseMeta
+          ? {
+              status: responseMeta.status,
+              time_ms: responseMeta.time_ms,
+              headers: Object.keys(lastResponseHeaders).length > 0 ? lastResponseHeaders : undefined,
+              body:
+                response && response !== "Loading..."
+                  ? response.length > MAX_RESPONSE_BODY
+                    ? response.slice(0, MAX_RESPONSE_BODY) + "\n... (truncated)"
+                    : response
+                  : undefined,
+            }
+          : null,
+      };
+
+      const reply = await invoke<string>("chat", {
+        message: text,
+        provider,
+        apiKey,
+        context,
+      });
       setChatMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", text: reply },
       ]);
     } catch (e) {
+      const errMsg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Sorry, something went wrong.";
       setChatMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "Sorry, something went wrong.",
+          text: errMsg,
         },
       ]);
     } finally {
@@ -635,12 +703,110 @@ function App() {
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.95 }}
+            onClick={() => setSettingsOpen(true)}
             className="text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
+            title="Settings"
+            aria-label="Settings"
           >
             <Settings className="w-5 h-5" />
           </motion.button>
         </div>
       </motion.header>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {settingsOpen && (
+          <motion.div
+            key="settings-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+            onClick={() => {
+              const val = settingsApiKey.trim();
+              if (val) localStorage.setItem(getApiKeyStorageKey(settingsProvider), val);
+              setSettingsOpen(false);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6"
+            >
+              <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                Settings
+              </h3>
+              <div className="space-y-2 mb-4">
+                <label className="block text-sm font-medium text-slate-600">
+                  LLM Provider
+                </label>
+                <select
+                  value={settingsProvider}
+                  onChange={(e) => {
+                    const newProvider = e.target.value as LLMProviderId;
+                    const currentKey = settingsApiKey.trim();
+                    if (currentKey) localStorage.setItem(getApiKeyStorageKey(settingsProvider), currentKey);
+                    setSettingsProvider(newProvider);
+                    setSettingsApiKey(localStorage.getItem(getApiKeyStorageKey(newProvider)) ?? "");
+                  }}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                >
+                  {LLM_PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-600">
+                  {LLM_PROVIDERS.find((p) => p.id === settingsProvider)?.label ?? settingsProvider} API Key
+                </label>
+                <input
+                  type="password"
+                  value={settingsApiKey}
+                  onChange={(e) => setSettingsApiKey(e.target.value)}
+                  placeholder={LLM_PROVIDERS.find((p) => p.id === settingsProvider)?.keyHint ?? "sk-..."}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-slate-500">
+                  Required for ZII Assistant. Get a key at {LLM_PROVIDERS.find((p) => p.id === settingsProvider)?.keyUrl ?? "provider website"}. Stored locally.
+                </p>
+              </div>
+              <div className="flex gap-2 mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    const val = settingsApiKey.trim();
+                    const keyStorage = getApiKeyStorageKey(settingsProvider);
+                    if (val) localStorage.setItem(keyStorage, val);
+                    else localStorage.removeItem(keyStorage);
+                    localStorage.setItem(LLM_PROVIDER_STORAGE, settingsProvider);
+                    setSettingsSaved(true);
+                    setTimeout(() => setSettingsSaved(false), 1500);
+                    setSettingsOpen(false);
+                  }}
+                  className="flex-1 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  {settingsSaved ? "Saved!" : "Save"}
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setSettingsOpen(false)}
+                  className="flex-1 px-4 py-2 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main App Layout */}
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative z-0">
