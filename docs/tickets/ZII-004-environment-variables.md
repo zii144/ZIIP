@@ -16,15 +16,15 @@ Add Postman-style environment variables so users can define reusable values (e.g
 
 ## Acceptance Criteria (checklist)
 
-- [ ] Add an "Environments" section in settings (or a dedicated Environments panel)
-- [ ] Support multiple named environments (e.g. Development, Production)
-- [ ] Variables are key-value pairs: `baseUrl` → `https://api.dev.example.com`
-- [ ] Syntax: `{{variableName}}` for substitution
-- [ ] Substitution applies to: URL, query params, headers, body (JSON and raw)
-- [ ] Allow selecting the active environment (dropdown in header or settings)
-- [ ] Persist environments and variables to `localStorage`
-- [ ] Clear UX when a variable is unresolved (show warning or placeholder)
-- [ ] ZII chat receives resolved values in request context (not raw `{{var}}`)
+- [x] Add an "Environments" section in settings (or a dedicated Environments panel)
+- [x] Support multiple named environments (e.g. Development, Production)
+- [x] Variables are key-value pairs: `baseUrl` → `https://api.dev.example.com`
+- [x] Syntax: `{{variableName}}` for substitution
+- [x] Substitution applies to: URL, query params, headers, body (JSON and raw)
+- [x] Allow selecting the active environment (dropdown in header or settings)
+- [x] Persist environments and variables to `localStorage`
+- [x] Clear UX when a variable is unresolved (show warning or placeholder)
+- [x] ZII chat receives resolved values in request context (not raw `{{var}}`)
 
 ## Technical Notes
 
