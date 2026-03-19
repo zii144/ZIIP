@@ -89,6 +89,8 @@ struct RequestContext {
     headers: Option<std::collections::HashMap<String, String>>,
     #[serde(default)]
     body: Option<String>,
+    #[serde(default, rename = "collectionsSummary")]
+    collections_summary: Option<String>,
     #[serde(default, rename = "lastResponse")]
     last_response: Option<LastResponseContext>,
 }
@@ -148,6 +150,11 @@ fn build_context_block(ctx: &RequestContext) -> String {
                 b.clone()
             };
             lines.push(format!("Body: {}", truncated));
+        }
+    }
+    if let Some(s) = &ctx.collections_summary {
+        if !s.is_empty() {
+            lines.push(format!("User's saved collections (collection name -> request names): {}", s));
         }
     }
     if let Some(lr) = &ctx.last_response {

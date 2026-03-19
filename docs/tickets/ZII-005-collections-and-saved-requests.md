@@ -16,15 +16,15 @@ Add Postman-style collections so users can save, organize, and quickly replay re
 
 ## Acceptance Criteria (checklist)
 
-- [ ] Add a "Collections" or "Saved" section (sidebar, accordion, or tab alongside History)
-- [ ] Users can create named collections (e.g. "Auth API", "User Service")
-- [ ] Users can save the current request into a collection with an optional name
-- [ ] Saved request stores: method, URL, headers, params, body, auth (Bearrer/Basic)
-- [ ] Clicking a saved request loads it into the builder (does not auto-send)
+- [x] Add a "Collections" or "Saved" section (sidebar, accordion, or tab alongside History)
+- [x] Users can create named collections (e.g. "Auth API", "User Service")
+- [x] Users can save the current request into a collection with an optional name
+- [x] Saved request stores: method, URL, headers, params, body, auth (Bearrer/Basic)
+- [x] Clicking a saved request loads it into the builder (does not auto-send)
 - [ ] Support nested folders within collections (optional, can be v2)
-- [ ] Persist collections to `localStorage`
-- [ ] Allow edit/delete of collections and saved requests
-- [ ] ZII can reference collection/request names in context when helping user
+- [x] Persist collections to `localStorage`
+- [x] Allow edit/delete of collections and saved requests
+- [x] ZII can reference collection/request names in context when helping user
 
 ## Technical Notes
 

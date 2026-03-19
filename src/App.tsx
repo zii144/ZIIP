@@ -11,6 +11,9 @@ import {
   FileInput,
   ChevronDown,
   Layers,
+  FolderOpen,
+  Save,
+  Pencil,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import logoSvg from "/logo.svg";
@@ -34,7 +37,28 @@ type RequestHistoryEntry = {
   time_ms?: number;
 };
 
+type SavedRequest = {
+  id: string;
+  name: string;
+  method: string;
+  url: string;
+  headers: KeyValuePair[];
+  params: KeyValuePair[];
+  body: string;
+  authType: "None" | "Bearer" | "Basic";
+  bearerToken: string;
+  basicUsername: string;
+  basicPassword: string;
+};
+
+type Collection = {
+  id: string;
+  name: string;
+  requests: SavedRequest[];
+};
+
 const HISTORY_STORAGE_KEY = "ziip-request-history";
+const COLLECTIONS_STORAGE_KEY = "ziip-collections";
 const LLM_PROVIDER_STORAGE = "ziip-llm-provider";
 const GEMINI_API_KEY_STORAGE = "ziip-gemini-api-key";
 const OPENAI_API_KEY_STORAGE = "ziip-openai-api-key";
@@ -275,6 +299,23 @@ function saveHistory(entries: RequestHistoryEntry[]) {
   } catch {}
 }
 
+function loadCollections(): Collection[] {
+  try {
+    const raw = localStorage.getItem(COLLECTIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCollections(collections: Collection[]) {
+  try {
+    localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(collections));
+  } catch {}
+}
+
 const HEADER_PRESETS: { label: string; key: string; value: string }[] = [
   {
     label: "Content-Type JSON",
@@ -338,6 +379,18 @@ function App() {
     loadHistory,
   );
   const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
+  const [collections, setCollections] = useState<Collection[]>(loadCollections);
+  const [collectionsDropdownOpen, setCollectionsDropdownOpen] = useState(false);
+  const [collectionsCollapsed, setCollectionsCollapsed] = useState<Record<string, boolean>>({});
+  const [saveRequestOpen, setSaveRequestOpen] = useState(false);
+  const [saveRequestCollectionId, setSaveRequestCollectionId] = useState<string | null>(null);
+  const [saveRequestName, setSaveRequestName] = useState("");
+  const [createCollectionOpen, setCreateCollectionOpen] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
+  const [editingCollectionName, setEditingCollectionName] = useState("");
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
+  const [editingRequestName, setEditingRequestName] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [environments, setEnvironments] = useState<Environment[]>(loadEnvironments);
   const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(
@@ -357,6 +410,7 @@ function App() {
   const envDropdownRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const historyDropdownRef = useRef<HTMLDivElement>(null);
+  const collectionsDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -383,10 +437,13 @@ function App() {
       if (envDropdownOpen && envDropdownRef.current && !envDropdownRef.current.contains(target)) {
         setEnvDropdownOpen(false);
       }
+      if (collectionsDropdownOpen && collectionsDropdownRef.current && !collectionsDropdownRef.current.contains(target)) {
+        setCollectionsDropdownOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [historyDropdownOpen, envDropdownOpen]);
+  }, [historyDropdownOpen, envDropdownOpen, collectionsDropdownOpen]);
 
   useEffect(() => {
     saveEnvironments(environments);
@@ -399,6 +456,143 @@ function App() {
       localStorage.removeItem(ACTIVE_ENVIRONMENT_STORAGE_KEY);
     }
   }, [activeEnvironmentId]);
+
+  useEffect(() => {
+    saveCollections(collections);
+  }, [collections]);
+
+  const openCreateCollectionModal = () => {
+    setNewCollectionName("");
+    setCreateCollectionOpen(true);
+  };
+
+  const createCollection = () => {
+    const name = newCollectionName.trim();
+    if (!name) return;
+    setCollections((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name, requests: [] },
+    ]);
+    setCreateCollectionOpen(false);
+    setNewCollectionName("");
+  };
+
+  const saveCurrentRequest = (collectionId: string, requestName?: string) => {
+    const req: SavedRequest = {
+      id: crypto.randomUUID(),
+      name: requestName?.trim() || `${method} ${url}`.slice(0, 50),
+      method,
+      url,
+      headers: headers.filter((h) => h.key || h.value).length > 0
+        ? headers
+        : [{ id: crypto.randomUUID(), key: "", value: "", enabled: true }],
+      params: params.filter((p) => p.key || p.value).length > 0
+        ? params
+        : [{ id: crypto.randomUUID(), key: "", value: "", enabled: true }],
+      body: bodyContent,
+      authType,
+      bearerToken,
+      basicUsername,
+      basicPassword,
+    };
+    setCollections((prev) =>
+      prev.map((c) =>
+        c.id === collectionId
+          ? { ...c, requests: [...c.requests, req] }
+          : c,
+      ),
+    );
+    setSaveRequestOpen(false);
+    setSaveRequestCollectionId(null);
+    setSaveRequestName("");
+  };
+
+  const applySavedRequest = (req: SavedRequest) => {
+    setMethod(req.method);
+    setUrl(req.url);
+    setHeaders(
+      req.headers.length > 0
+        ? [...req.headers, { id: crypto.randomUUID(), key: "", value: "", enabled: true }]
+        : [{ id: crypto.randomUUID(), key: "", value: "", enabled: true }],
+    );
+    setParams(
+      req.params.length > 0
+        ? [...req.params, { id: crypto.randomUUID(), key: "", value: "", enabled: true }]
+        : [{ id: crypto.randomUUID(), key: "", value: "", enabled: true }],
+    );
+    setBodyContent(req.body);
+    setAuthType(req.authType);
+    setBearerToken(req.bearerToken);
+    setBasicUsername(req.basicUsername);
+    setBasicPassword(req.basicPassword);
+    setCollectionsDropdownOpen(false);
+  };
+
+  const deleteCollection = (id: string) => {
+    setCollections((prev) => prev.filter((c) => c.id !== id));
+    setCollectionsDropdownOpen(collections.length > 1);
+  };
+
+  const deleteSavedRequest = (collectionId: string, requestId: string) => {
+    setCollections((prev) =>
+      prev.map((c) =>
+        c.id === collectionId
+          ? { ...c, requests: c.requests.filter((r) => r.id !== requestId) }
+          : c,
+      ),
+    );
+  };
+
+  const toggleCollectionCollapsed = (id: string) => {
+    setCollectionsCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const startEditCollection = (c: Collection) => {
+    setEditingCollectionId(c.id);
+    setEditingCollectionName(c.name);
+  };
+
+  const saveEditCollection = () => {
+    if (editingCollectionId) {
+      setCollections((prev) =>
+        prev.map((c) =>
+          c.id === editingCollectionId
+            ? { ...c, name: editingCollectionName.trim() || c.name }
+            : c,
+        ),
+      );
+      setEditingCollectionId(null);
+      setEditingCollectionName("");
+    }
+  };
+
+  const startEditRequest = (req: SavedRequest) => {
+    setEditingRequestId(req.id);
+    setEditingRequestName(req.name);
+  };
+
+  const saveEditRequest = () => {
+    if (editingRequestId) {
+      setCollections((prev) =>
+        prev.map((c) => ({
+          ...c,
+          requests: c.requests.map((r) =>
+            r.id === editingRequestId
+              ? { ...r, name: editingRequestName.trim() || r.name }
+              : r,
+          ),
+        })),
+      );
+      setEditingRequestId(null);
+      setEditingRequestName("");
+    }
+  };
+
+  const openSaveRequestModal = (collectionId?: string) => {
+    setSaveRequestOpen(true);
+    setSaveRequestCollectionId(collectionId ?? (collections[0]?.id ?? null));
+    setSaveRequestName("");
+  };
 
   const addToHistory = (
     method: string,
@@ -471,6 +665,14 @@ function App() {
         params: contextParams.length > 0 ? contextParams : undefined,
         headers: Object.keys(compiledHeaders).length > 0 ? compiledHeaders : undefined,
         body: resolvedBody.trim() || undefined,
+        collectionsSummary:
+          collections.length > 0
+            ? collections
+                .map((c) =>
+                  `"${c.name}": [${c.requests.map((r) => `"${r.name}"`).join(", ")}]`,
+                )
+                .join("; ")
+            : undefined,
         lastResponse: responseMeta
           ? {
               status: responseMeta.status,
@@ -922,7 +1124,10 @@ function App() {
             <motion.button
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => setHistoryDropdownOpen((o) => !o)}
+              onClick={() => {
+                setCollectionsDropdownOpen(false);
+                setHistoryDropdownOpen((o) => !o);
+              }}
               className={`transition-colors cursor-pointer ${historyDropdownOpen ? "text-slate-900" : "text-slate-400 hover:text-slate-900"}`}
               title="Request history"
               aria-label="Request history"
@@ -989,6 +1194,211 @@ function App() {
               )}
             </AnimatePresence>
           </div>
+          <div ref={collectionsDropdownRef} className="relative flex items-center">
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                setCollectionsDropdownOpen((o) => !o);
+                setHistoryDropdownOpen(false);
+              }}
+              className={`transition-colors cursor-pointer ${collectionsDropdownOpen ? "text-slate-900" : "text-slate-400 hover:text-slate-900"}`}
+              title="Saved requests"
+              aria-label="Collections"
+            >
+              <FolderOpen className="w-5 h-5" />
+            </motion.button>
+            <AnimatePresence>
+              {collectionsDropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-full mt-2 w-80 max-h-80 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-xl z-[100] flex flex-col"
+                >
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 shrink-0">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      Saved requests
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => {
+                          if (collections.length === 0) {
+                            openCreateCollectionModal();
+                          } else {
+                            openSaveRequestModal();
+                          }
+                          setHistoryDropdownOpen(false);
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-900 transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Save
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openCreateCollectionModal();
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-900 transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        New
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto min-h-0 flex-1 py-1">
+                    {collections.length === 0 ? (
+                      <div className="px-4 py-8 flex flex-col items-center gap-4">
+                        <p className="text-sm text-slate-400 text-center">
+                          No collections. Create one to save requests for quick access.
+                        </p>
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCreateCollectionModal();
+                          }}
+                          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Create collection
+                        </motion.button>
+                      </div>
+                    ) : (
+                      collections.map((coll) => (
+                        <div key={coll.id} className="border-b border-slate-100 last:border-0">
+                          <div className="flex items-center group">
+                            <button
+                              onClick={() => toggleCollectionCollapsed(coll.id)}
+                              className="flex-1 flex items-center gap-1.5 px-3 py-2 hover:bg-slate-50 text-left min-w-0"
+                            >
+                              <ChevronDown
+                                className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${collectionsCollapsed[coll.id] ? "-rotate-90" : ""}`}
+                              />
+                              {editingCollectionId === coll.id ? (
+                                <input
+                                  value={editingCollectionName}
+                                  onChange={(e) => setEditingCollectionName(e.target.value)}
+                                  onBlur={saveEditCollection}
+                                  onKeyDown={(e) => e.key === "Enter" && saveEditCollection()}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex-1 px-2 py-0.5 text-sm font-medium border border-slate-200 rounded focus:outline-none focus:border-slate-400"
+                                  autoFocus
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-slate-800 truncate">
+                                  {coll.name}
+                                </span>
+                              )}
+                            </button>
+                            {editingCollectionId !== coll.id && (
+                              <div className="flex opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditCollection(coll);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteCollection(coll.id);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-rose-500 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          {!collectionsCollapsed[coll.id] && (
+                            <div className="pl-6 pb-1">
+                              {coll.requests.length === 0 ? (
+                                <button
+                                  onClick={() => openSaveRequestModal(coll.id)}
+                                  className="w-full text-left px-2 py-1.5 text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded cursor-pointer"
+                                >
+                                  + Add request
+                                </button>
+                              ) : (
+                                coll.requests.map((req) => (
+                                  <div
+                                    key={req.id}
+                                    className="flex items-center group/req"
+                                  >
+                                    <button
+                                      onClick={() => applySavedRequest(req)}
+                                      className="flex-1 text-left px-2 py-1.5 hover:bg-slate-50 rounded min-w-0 flex items-center gap-2"
+                                    >
+                                      {editingRequestId === req.id ? (
+                                        <input
+                                          value={editingRequestName}
+                                          onChange={(e) => setEditingRequestName(e.target.value)}
+                                          onBlur={saveEditRequest}
+                                          onKeyDown={(e) => e.key === "Enter" && saveEditRequest()}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="flex-1 px-2 py-0.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-400"
+                                          autoFocus
+                                        />
+                                      ) : (
+                                        <>
+                                          <span className="text-[10px] font-bold px-1 py-0.5 rounded bg-slate-200 text-slate-700 shrink-0">
+                                            {req.method}
+                                          </span>
+                                          <span className="text-xs text-slate-700 truncate">
+                                            {req.name}
+                                          </span>
+                                        </>
+                                      )}
+                                    </button>
+                                    {editingRequestId !== req.id && (
+                                      <div className="flex opacity-0 group-hover/req:opacity-100 transition-opacity">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            startEditRequest(req);
+                                          }}
+                                          className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                        >
+                                          <Pencil className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteSavedRequest(coll.id, req.id);
+                                          }}
+                                          className="p-1 text-slate-400 hover:text-rose-500 cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                              <button
+                                onClick={() => openSaveRequestModal(coll.id)}
+                                className="w-full text-left px-2 py-1 text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded cursor-pointer flex items-center gap-1"
+                              >
+                                <Plus className="w-3 h-3" />
+                                Add request
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <motion.button
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.95 }}
@@ -1001,6 +1411,158 @@ function App() {
           </motion.button>
         </div>
       </motion.header>
+
+      {/* Create Collection Modal */}
+      <AnimatePresence>
+        {createCollectionOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+            onClick={() => {
+              setCreateCollectionOpen(false);
+              setNewCollectionName("");
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm p-6"
+            >
+              <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                New collection
+              </h3>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Collection name
+                </label>
+                <input
+                  type="text"
+                  value={newCollectionName}
+                  onChange={(e) => setNewCollectionName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && newCollectionName.trim() && createCollection()}
+                  placeholder="e.g. Auth API, User Service"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2 mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => newCollectionName.trim() && createCollection()}
+                  disabled={!newCollectionName.trim()}
+                  className="flex-1 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setCreateCollectionOpen(false);
+                    setNewCollectionName("");
+                  }}
+                  className="flex-1 px-4 py-2 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Save Request Modal */}
+      <AnimatePresence>
+        {saveRequestOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+            onClick={() => {
+              setSaveRequestOpen(false);
+              setSaveRequestCollectionId(null);
+              setSaveRequestName("");
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-sm p-6"
+            >
+              <h3 className="text-lg font-semibold text-slate-900 mb-4">
+                Save request to collection
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Collection
+                  </label>
+                  <select
+                    value={saveRequestCollectionId ?? ""}
+                    onChange={(e) => setSaveRequestCollectionId(e.target.value || null)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
+                  >
+                    {collections.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Request name (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={saveRequestName}
+                    onChange={(e) => setSaveRequestName(e.target.value)}
+                    placeholder={`${method} ${url}`.slice(0, 50)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    if (saveRequestCollectionId) {
+                      saveCurrentRequest(saveRequestCollectionId, saveRequestName || undefined);
+                    }
+                  }}
+                  disabled={!saveRequestCollectionId || collections.length === 0}
+                  className="flex-1 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  Save
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setSaveRequestOpen(false);
+                    setSaveRequestCollectionId(null);
+                    setSaveRequestName("");
+                  }}
+                  className="flex-1 px-4 py-2 text-slate-600 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Settings Modal */}
       <AnimatePresence>
@@ -1318,6 +1880,22 @@ function App() {
                 wrapperClassName="flex-1 min-w-0"
                 mirrorPadding="px-2 py-2"
               />
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => {
+                  if (collections.length === 0) {
+                    openCreateCollectionModal();
+                  } else {
+                    openSaveRequestModal();
+                  }
+                }}
+                className="bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 px-4 py-2 rounded-lg font-medium text-sm transition-all border border-slate-200 hover:border-slate-300 flex items-center gap-2 cursor-pointer"
+                title="Save request to collection"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save</span>
+              </motion.button>
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
