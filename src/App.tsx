@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Send,
@@ -130,6 +131,9 @@ function App() {
   const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const historyDropdownRef = useRef<HTMLDivElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const historyDropdownContentRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -140,12 +144,22 @@ function App() {
   }, [requestHistory]);
 
   useEffect(() => {
+    if (historyDropdownOpen && historyButtonRef.current) {
+      const rect = historyButtonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        left: rect.right - 320,
+      });
+    }
+  }, [historyDropdownOpen]);
+
+  useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (
-        historyDropdownOpen &&
-        historyDropdownRef.current &&
-        !historyDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (!historyDropdownOpen) return;
+      const target = e.target as Node;
+      const inButton = historyDropdownRef.current?.contains(target);
+      const inDropdown = historyDropdownContentRef.current?.contains(target);
+      if (!inButton && !inDropdown) {
         setHistoryDropdownOpen(false);
       }
     }
@@ -565,7 +579,7 @@ function App() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.96 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-0 top-full mt-2 w-80 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-xl z-50 flex flex-col"
+                  className="absolute right-0 top-full mt-2 w-80 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-xl z-[100] flex flex-col"
                 >
                   <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 shrink-0">
                     <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
@@ -629,7 +643,7 @@ function App() {
       </motion.header>
 
       {/* Main App Layout */}
-      <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative">
+      <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative z-0">
         {/* Left Column: API Client */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
@@ -1033,7 +1047,7 @@ function App() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="w-full md:w-80 lg:w-96 bg-gradient-to-b from-slate-50 to-white flex flex-col flex-shrink-0 border-l border-slate-200 relative overflow-hidden hidden md:flex"
+          className="w-full md:w-80 lg:w-96 bg-gradient-to-b from-slate-50 to-white flex flex-col shrink-0 border-l border-slate-200 relative overflow-hidden hidden md:flex -z-10"
         >
           {/* Background Ambient Glow */}
           <div className="absolute top-0 right-0 w-64 h-64 bg-slate-200/40 blur-[80px] rounded-full pointer-events-none" />
